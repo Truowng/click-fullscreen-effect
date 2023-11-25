@@ -12,7 +12,7 @@
  - update the mouse position and velocity in the render callback of that plane
  ***/
 
-import { Curtains, Plane, Vec2, PingPongPlane } from "../../../src/index.mjs";
+import { Curtains, Plane, Vec2, PingPongPlane } from "../src/index.mjs";
 
 window.addEventListener("load", () => {
   const curtains = new Curtains({
