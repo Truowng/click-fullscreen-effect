@@ -1,44 +1,53 @@
-import {Curtains, Plane, Vec2, Vec3, PingPongPlane, ShaderPass, FXAAPass} from '../../../src/index.mjs';
+import {
+  Curtains,
+  Plane,
+  Vec2,
+  Vec3,
+  PingPongPlane,
+  ShaderPass,
+  FXAAPass,
+} from "../src/index.mjs";
 
 window.addEventListener("load", () => {
-    // set up our WebGL context and append the canvas to our wrapper
-    const curtains = new Curtains({
-        container: "canvas",
-        pixelRatio: Math.min(1.5, window.devicePixelRatio), // limit pixel ratio for performance
-        autoRender: false, // use gsap ticker to render our scene
+  // set up our WebGL context and append the canvas to our wrapper
+  const curtains = new Curtains({
+    container: "canvas",
+    pixelRatio: Math.min(1.5, window.devicePixelRatio), // limit pixel ratio for performance
+    autoRender: false, // use gsap ticker to render our scene
+  });
+
+  curtains
+    .onScroll(() => {
+      // update the plane texture offset during scroll
+      planes.forEach((plane) => {
+        applyPlanesParallax(plane);
+      });
+    })
+    .onError(() => {
+      // we will add a class to the document body to display original images
+      document.body.classList.add("no-curtains", "planes-loaded");
+    })
+    .onContextLost(() => {
+      // on context lost, try to restore the context
+      curtains.restoreContext();
     });
 
-    curtains.onScroll(() => {
-        // update the plane texture offset during scroll
-        planes.forEach((plane) => {
-            applyPlanesParallax(plane);
-        })
+  const mouse = new Vec2();
+  const lastMouse = mouse.clone();
+  const velocity = new Vec2();
 
-    }).onError(() => {
-        // we will add a class to the document body to display original images
-        document.body.classList.add("no-curtains", "planes-loaded");
-    }).onContextLost(() => {
-        // on context lost, try to restore the context
-        curtains.restoreContext();
-    });
+  // use gsap ticker to render our scene
+  // gsap ticker handles different monitor refresh rates
+  // besides for performance we'll want to have only one request animation frame loop running
+  gsap.ticker.add(curtains.render.bind(curtains));
 
-    const mouse = new Vec2();
-    const lastMouse = mouse.clone();
-    const velocity = new Vec2();
+  // we will keep track of all our planes in an array
+  const planes = [];
 
+  // get our planes elements
+  const planeElements = document.getElementsByClassName("plane");
 
-    // use gsap ticker to render our scene
-    // gsap ticker handles different monitor refresh rates
-    // besides for performance we'll want to have only one request animation frame loop running
-    gsap.ticker.add(curtains.render.bind(curtains));
-
-    // we will keep track of all our planes in an array
-    const planes = [];
-
-    // get our planes elements
-    const planeElements = document.getElementsByClassName("plane");
-
-    const vs = `
+  const vs = `
         precision mediump float;
 
         // default mandatory variables
@@ -91,7 +100,7 @@ window.addEventListener("load", () => {
         }
     `;
 
-    const fs = `
+  const fs = `
         precision mediump float;
 
         varying vec3 vVertexPosition;
@@ -113,330 +122,342 @@ window.addEventListener("load", () => {
         }
     `;
 
-    const params = {
-        vertexShader: vs,
-        fragmentShader: fs,
-        widthSegments: 10,
-        heightSegments: 10,
-        uniforms: {
-            time: {
-                name: "uTime",
-                type: "1f",
-                value: 0,
-            },
-            fullscreenTransition: {
-                name: "uTransition",
-                type: "1f",
-                value: 0,
-            },
-            mousePosition: {
-                name: "uMousePosition",
-                type: "2f",
-                value: mouse,
-            }
+  const params = {
+    vertexShader: vs,
+    fragmentShader: fs,
+    widthSegments: 10,
+    heightSegments: 10,
+    uniforms: {
+      time: {
+        name: "uTime",
+        type: "1f",
+        value: 0,
+      },
+      fullscreenTransition: {
+        name: "uTransition",
+        type: "1f",
+        value: 0,
+      },
+      mousePosition: {
+        name: "uMousePosition",
+        type: "2f",
+        value: mouse,
+      },
+    },
+  };
+
+  // add our planes and handle them
+  for (let i = 0; i < planeElements.length; i++) {
+    const plane = new Plane(curtains, planeElements[i], params);
+
+    planes.push(plane);
+
+    handlePlanes(i);
+  }
+
+  // handle all the planes
+  function handlePlanes(index) {
+    const plane = planes[index];
+
+    plane
+      .onReady(() => {
+        plane.textures[0].setScale(new Vec2(1.5, 1.5));
+
+        // apply parallax on load
+        applyPlanesParallax(plane);
+
+        // once everything is ready, display everything
+        if (index === planes.length - 1) {
+          document.body.classList.add("planes-loaded");
         }
-    };
 
-    // add our planes and handle them
-    for(let i = 0; i < planeElements.length; i++) {
-        const plane = new Plane(curtains, planeElements[i], params);
-
-        planes.push(plane);
-
-        handlePlanes(i);
-    }
-
-    // handle all the planes
-    function handlePlanes(index) {
-        const plane = planes[index];
-
-        plane.onReady(() => {
-            plane.textures[0].setScale(new Vec2(1.5, 1.5));
-
-            // apply parallax on load
-            applyPlanesParallax(plane);
-
-            // once everything is ready, display everything
-            if(index === planes.length - 1) {
-                document.body.classList.add("planes-loaded");
-            }
-
-            plane.htmlElement.addEventListener("click", (e) => {
-                onPlaneClick(e, plane);
-            });
-
-        }).onAfterResize(() => {
-            // if plane is displayed fullscreen, update its scale and translations
-            if(plane.userData.isFullscreen) {
-                const planeBoundingRect = plane.getBoundingRect();
-                const curtainBoundingRect = curtains.getBoundingRect();
-
-                plane.setScale(new Vec2(
-                    curtainBoundingRect.width / planeBoundingRect.width,
-                    curtainBoundingRect.height / planeBoundingRect.height
-                ));
-
-                plane.setRelativeTranslation(new Vec3(
-                    -1 * planeBoundingRect.left / curtains.pixelRatio,
-                    -1 * planeBoundingRect.top / curtains.pixelRatio,
-                    0
-                ));
-            }
-
-            // apply new parallax values after resize
-            applyPlanesParallax(plane);
-        }).onRender(() => {
-            plane.uniforms.time.value++;
+        plane.htmlElement.addEventListener("click", (e) => {
+          onPlaneClick(e, plane);
         });
-    }
+      })
+      .onAfterResize(() => {
+        // if plane is displayed fullscreen, update its scale and translations
+        if (plane.userData.isFullscreen) {
+          const planeBoundingRect = plane.getBoundingRect();
+          const curtainBoundingRect = curtains.getBoundingRect();
 
-    function applyPlanesParallax(plane) {
-        // calculate the parallax effect
-        // get our window size
-        const sceneBoundingRect = curtains.getBoundingRect();
-        // get our plane center coordinate
-        const planeBoundingRect = plane.getBoundingRect();
-        const planeOffsetTop = planeBoundingRect.top + planeBoundingRect.height / 2;
-        // get a float value based on window height (0 means the plane is centered)
-        const parallaxEffect = (planeOffsetTop - sceneBoundingRect.height / 2) / sceneBoundingRect.height;
+          plane.setScale(
+            new Vec2(
+              curtainBoundingRect.width / planeBoundingRect.width,
+              curtainBoundingRect.height / planeBoundingRect.height
+            )
+          );
 
-        // set texture offset
-        const texture = plane.textures[0];
-        texture.offset.y = (1 - texture.scale.y) * 0.5 * parallaxEffect;
-    }
-
-    /*** GALLERY ***/
-
-
-    const galleryState = {
-        fullscreenThumb: false, // is actually displaying a fullscreen image
-        closeButtonEl: document.getElementById("close-button"), // close button element
-        openTween: null, // opening tween
-        closeTween: null, // closing tween
-    };
-
-    // on closing a fullscreen image
-    galleryState.closeButtonEl.addEventListener("click", () => {
-        const fullScreenPlane = curtains.planes.find(plane => plane.userData.isFullscreen);
-
-        // if there's a plane actually displayed fullscreen, we'll be shrinking it back to normal
-        if(fullScreenPlane && galleryState.fullscreenThumb) {
-            // reset fullscreen state
-            galleryState.fullscreenThumb = false;
-            document.body.classList.remove("is-fullscreen");
-
-            fullScreenPlane.userData.isFullscreen = false;
-
-            // hide close button again
-            galleryState.closeButtonEl.style.display = "none";
-
-            // force mouse position to be at the center of the plane
-            fullScreenPlane.uniforms.mousePosition.value.set(0, 0);
-            // reset timer for the animation
-            fullScreenPlane.uniforms.time.value = 0;
-
-            // draw all other planes again
-            const allOtherPlanes = curtains.planes.filter(el => el.uuid !== fullScreenPlane.uuid && el.type !== "PingPongPlane");
-            allOtherPlanes.forEach(el => {
-                el.visible = true;
-            });
-
-            // object that will be tweened
-            let animation = {
-                // current scale and translation values
-                scaleX: fullScreenPlane.scale.x,
-                scaleY: fullScreenPlane.scale.y,
-                translationX: fullScreenPlane.relativeTranslation.x,
-                translationY: fullScreenPlane.relativeTranslation.y,
-                // transition effect back 0 from to 1
-                transition: 1,
-                // texture scale back from 1 to 1.5
-                textureScale: 1,
-            };
-
-            // create vectors only once and use them later on during tween onUpdate callback
-            const newScale = new Vec2();
-            const newTranslation = new Vec3();
-
-            // kill tween
-            if(galleryState.closeTween) {
-                galleryState.closeTween.kill();
-            }
-
-            galleryState.closeTween = gsap.to(animation, 2, {
-                scaleX: 1,
-                scaleY: 1,
-                translationX: 0,
-                translationY: 0,
-                transition: 0,
-                textureScale: 1.5,
-                ease: Power3.easeInOut,
-                onUpdate: function() {
-                    // plane scale
-                    newScale.set(animation.scaleX, animation.scaleY);
-                    fullScreenPlane.setScale(newScale);
-
-                    // plane translation
-                    newTranslation.set(animation.translationX, animation.translationY, 0);
-                    fullScreenPlane.setRelativeTranslation(newTranslation);
-
-                    // texture scale
-                    newScale.set(animation.textureScale, animation.textureScale);
-                    fullScreenPlane.textures[0].setScale(newScale);
-
-                    // transition
-                    fullScreenPlane.uniforms.fullscreenTransition.value = animation.transition;
-
-                    // apply parallax to change texture offset
-                    applyPlanesParallax(fullScreenPlane);
-                },
-                onComplete: function() {
-                    // reset the plane renderOrder to 0 (we could have ommit the parameter)
-                    fullScreenPlane.setRenderOrder(0);
-
-                    // clear tween
-                    galleryState.closeTween = null;
-                }
-            });
-        }
-    });
-
-    function onPlaneClick(event, plane) {
-        // if no planes are already displayed fullscreen
-        if(!galleryState.fullscreenThumb) {
-            // set fullscreen state
-            galleryState.fullscreenThumb = true;
-            document.body.classList.add("is-fullscreen");
-
-            // flag this plane
-            plane.userData.isFullscreen = true;
-
-            // put plane in front
-            plane.setRenderOrder(1);
-
-            // start ripple effect from mouse position, and tween it to center
-            const startMousePostion = plane.mouseToPlaneCoords(mouse);
-            plane.uniforms.mousePosition.value.copy(startMousePostion);
-            plane.uniforms.time.value = 0;
-
-            // we'll be using bounding rect values to tween scale and translation values
-            const planeBoundingRect = plane.getBoundingRect();
-            const curtainBoundingRect = curtains.getBoundingRect();
-
-            // starting values
-            let animation = {
-                scaleX: 1,
-                scaleY: 1,
-                translationX: 0,
-                translationY: 0,
-                transition: 0,
-                textureScale: 1.5,
-                mouseX: startMousePostion.x,
-                mouseY: startMousePostion.y,
-            };
-
-
-            // create vectors only once and use them later on during tween onUpdate callback
-            const newScale = new Vec2();
-            const newTranslation = new Vec3();
-
-            // kill tween
-            if(galleryState.openTween) {
-                galleryState.openTween.kill();
-            }
-
-            // we want to take top left corner as our plane transform origin
-            plane.setTransformOrigin(newTranslation);
-
-            galleryState.openTween = gsap.to(animation, 2, {
-                scaleX: curtainBoundingRect.width / planeBoundingRect.width,
-                scaleY: curtainBoundingRect.height / planeBoundingRect.height,
-                translationX: -1 * planeBoundingRect.left / curtains.pixelRatio,
-                translationY: -1 * planeBoundingRect.top / curtains.pixelRatio,
-                transition: 1,
-                textureScale: 1,
-                mouseX: 0,
-                mouseY: 0,
-                ease: Power3.easeInOut,
-                onUpdate: function() {
-                    // plane scale
-                    newScale.set(animation.scaleX, animation.scaleY);
-                    plane.setScale(newScale);
-
-                    // plane translation
-                    newTranslation.set(animation.translationX, animation.translationY, 0);
-                    plane.setRelativeTranslation(newTranslation);
-
-                    // texture scale
-                    newScale.set(animation.textureScale, animation.textureScale);
-                    plane.textures[0].setScale(newScale);
-
-                    // transition value
-                    plane.uniforms.fullscreenTransition.value = animation.transition;
-
-                    // apply parallax to change texture offset
-                    applyPlanesParallax(plane);
-
-                    // tween mouse position back to center
-                    plane.uniforms.mousePosition.value.set(animation.mouseX, animation.mouseY);
-                },
-                onComplete: function() {
-                    // do not draw all other planes since animation is complete and they are hidden
-                    const nonClickedPlanes = curtains.planes.filter(el => el.uuid !== plane.uuid && el.type !== "PingPongPlane");
-
-                    nonClickedPlanes.forEach(el => {
-                        el.visible = false;
-                    });
-
-                    // display close button
-                    galleryState.closeButtonEl.style.display = "inline-block";
-
-                    // clear tween
-                    galleryState.openTween = null;
-                }
-            });
-        }
-    }
-
-
-
-
-    /*** POST PROCESSING ***/
-    // we'll be adding a flowmap rgb shift effect and fxaapass
-
-    // mouse/touch move
-    function onMouseMove(e) {
-        // velocity is our mouse position minus our mouse last position
-        lastMouse.copy(mouse);
-
-        // touch event
-        if(e.targetTouches) {
-            mouse.set(e.targetTouches[0].clientX, e.targetTouches[0].clientY);
-        }
-        // mouse event
-        else {
-            mouse.set(e.clientX, e.clientY);
+          plane.setRelativeTranslation(
+            new Vec3(
+              (-1 * planeBoundingRect.left) / curtains.pixelRatio,
+              (-1 * planeBoundingRect.top) / curtains.pixelRatio,
+              0
+            )
+          );
         }
 
-        // divided by a frame duration (roughly)
-        velocity.set((mouse.x - lastMouse.x) / 16, (mouse.y - lastMouse.y) / 16);
+        // apply new parallax values after resize
+        applyPlanesParallax(plane);
+      })
+      .onRender(() => {
+        plane.uniforms.time.value++;
+      });
+  }
 
-        // we should update the velocity
-        updateVelocity = true;
+  function applyPlanesParallax(plane) {
+    // calculate the parallax effect
+    // get our window size
+    const sceneBoundingRect = curtains.getBoundingRect();
+    // get our plane center coordinate
+    const planeBoundingRect = plane.getBoundingRect();
+    const planeOffsetTop = planeBoundingRect.top + planeBoundingRect.height / 2;
+    // get a float value based on window height (0 means the plane is centered)
+    const parallaxEffect =
+      (planeOffsetTop - sceneBoundingRect.height / 2) /
+      sceneBoundingRect.height;
+
+    // set texture offset
+    const texture = plane.textures[0];
+    texture.offset.y = (1 - texture.scale.y) * 0.5 * parallaxEffect;
+  }
+
+  /*** GALLERY ***/
+
+  const galleryState = {
+    fullscreenThumb: false, // is actually displaying a fullscreen image
+    closeButtonEl: document.getElementById("close-button"), // close button element
+    openTween: null, // opening tween
+    closeTween: null, // closing tween
+  };
+
+  // on closing a fullscreen image
+  galleryState.closeButtonEl.addEventListener("click", () => {
+    const fullScreenPlane = curtains.planes.find(
+      (plane) => plane.userData.isFullscreen
+    );
+
+    // if there's a plane actually displayed fullscreen, we'll be shrinking it back to normal
+    if (fullScreenPlane && galleryState.fullscreenThumb) {
+      // reset fullscreen state
+      galleryState.fullscreenThumb = false;
+      document.body.classList.remove("is-fullscreen");
+
+      fullScreenPlane.userData.isFullscreen = false;
+
+      // hide close button again
+      galleryState.closeButtonEl.style.display = "none";
+
+      // force mouse position to be at the center of the plane
+      fullScreenPlane.uniforms.mousePosition.value.set(0, 0);
+      // reset timer for the animation
+      fullScreenPlane.uniforms.time.value = 0;
+
+      // draw all other planes again
+      const allOtherPlanes = curtains.planes.filter(
+        (el) => el.uuid !== fullScreenPlane.uuid && el.type !== "PingPongPlane"
+      );
+      allOtherPlanes.forEach((el) => {
+        el.visible = true;
+      });
+
+      // object that will be tweened
+      let animation = {
+        // current scale and translation values
+        scaleX: fullScreenPlane.scale.x,
+        scaleY: fullScreenPlane.scale.y,
+        translationX: fullScreenPlane.relativeTranslation.x,
+        translationY: fullScreenPlane.relativeTranslation.y,
+        // transition effect back 0 from to 1
+        transition: 1,
+        // texture scale back from 1 to 1.5
+        textureScale: 1,
+      };
+
+      // create vectors only once and use them later on during tween onUpdate callback
+      const newScale = new Vec2();
+      const newTranslation = new Vec3();
+
+      // kill tween
+      if (galleryState.closeTween) {
+        galleryState.closeTween.kill();
+      }
+
+      galleryState.closeTween = gsap.to(animation, 2, {
+        scaleX: 1,
+        scaleY: 1,
+        translationX: 0,
+        translationY: 0,
+        transition: 0,
+        textureScale: 1.5,
+        ease: Power3.easeInOut,
+        onUpdate: function () {
+          // plane scale
+          newScale.set(animation.scaleX, animation.scaleY);
+          fullScreenPlane.setScale(newScale);
+
+          // plane translation
+          newTranslation.set(animation.translationX, animation.translationY, 0);
+          fullScreenPlane.setRelativeTranslation(newTranslation);
+
+          // texture scale
+          newScale.set(animation.textureScale, animation.textureScale);
+          fullScreenPlane.textures[0].setScale(newScale);
+
+          // transition
+          fullScreenPlane.uniforms.fullscreenTransition.value =
+            animation.transition;
+
+          // apply parallax to change texture offset
+          applyPlanesParallax(fullScreenPlane);
+        },
+        onComplete: function () {
+          // reset the plane renderOrder to 0 (we could have ommit the parameter)
+          fullScreenPlane.setRenderOrder(0);
+
+          // clear tween
+          galleryState.closeTween = null;
+        },
+      });
+    }
+  });
+
+  function onPlaneClick(event, plane) {
+    // if no planes are already displayed fullscreen
+    if (!galleryState.fullscreenThumb) {
+      // set fullscreen state
+      galleryState.fullscreenThumb = true;
+      document.body.classList.add("is-fullscreen");
+
+      // flag this plane
+      plane.userData.isFullscreen = true;
+
+      // put plane in front
+      plane.setRenderOrder(1);
+
+      // start ripple effect from mouse position, and tween it to center
+      const startMousePostion = plane.mouseToPlaneCoords(mouse);
+      plane.uniforms.mousePosition.value.copy(startMousePostion);
+      plane.uniforms.time.value = 0;
+
+      // we'll be using bounding rect values to tween scale and translation values
+      const planeBoundingRect = plane.getBoundingRect();
+      const curtainBoundingRect = curtains.getBoundingRect();
+
+      // starting values
+      let animation = {
+        scaleX: 1,
+        scaleY: 1,
+        translationX: 0,
+        translationY: 0,
+        transition: 0,
+        textureScale: 1.5,
+        mouseX: startMousePostion.x,
+        mouseY: startMousePostion.y,
+      };
+
+      // create vectors only once and use them later on during tween onUpdate callback
+      const newScale = new Vec2();
+      const newTranslation = new Vec3();
+
+      // kill tween
+      if (galleryState.openTween) {
+        galleryState.openTween.kill();
+      }
+
+      // we want to take top left corner as our plane transform origin
+      plane.setTransformOrigin(newTranslation);
+
+      galleryState.openTween = gsap.to(animation, 2, {
+        scaleX: curtainBoundingRect.width / planeBoundingRect.width,
+        scaleY: curtainBoundingRect.height / planeBoundingRect.height,
+        translationX: (-1 * planeBoundingRect.left) / curtains.pixelRatio,
+        translationY: (-1 * planeBoundingRect.top) / curtains.pixelRatio,
+        transition: 1,
+        textureScale: 1,
+        mouseX: 0,
+        mouseY: 0,
+        ease: Power3.easeInOut,
+        onUpdate: function () {
+          // plane scale
+          newScale.set(animation.scaleX, animation.scaleY);
+          plane.setScale(newScale);
+
+          // plane translation
+          newTranslation.set(animation.translationX, animation.translationY, 0);
+          plane.setRelativeTranslation(newTranslation);
+
+          // texture scale
+          newScale.set(animation.textureScale, animation.textureScale);
+          plane.textures[0].setScale(newScale);
+
+          // transition value
+          plane.uniforms.fullscreenTransition.value = animation.transition;
+
+          // apply parallax to change texture offset
+          applyPlanesParallax(plane);
+
+          // tween mouse position back to center
+          plane.uniforms.mousePosition.value.set(
+            animation.mouseX,
+            animation.mouseY
+          );
+        },
+        onComplete: function () {
+          // do not draw all other planes since animation is complete and they are hidden
+          const nonClickedPlanes = curtains.planes.filter(
+            (el) => el.uuid !== plane.uuid && el.type !== "PingPongPlane"
+          );
+
+          nonClickedPlanes.forEach((el) => {
+            el.visible = false;
+          });
+
+          // display close button
+          galleryState.closeButtonEl.style.display = "inline-block";
+
+          // clear tween
+          galleryState.openTween = null;
+        },
+      });
+    }
+  }
+
+  /*** POST PROCESSING ***/
+  // we'll be adding a flowmap rgb shift effect and fxaapass
+
+  // mouse/touch move
+  function onMouseMove(e) {
+    // velocity is our mouse position minus our mouse last position
+    lastMouse.copy(mouse);
+
+    // touch event
+    if (e.targetTouches) {
+      mouse.set(e.targetTouches[0].clientX, e.targetTouches[0].clientY);
+    }
+    // mouse event
+    else {
+      mouse.set(e.clientX, e.clientY);
     }
 
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("touchmove", onMouseMove, {
-        passive: true
-    });
+    // divided by a frame duration (roughly)
+    velocity.set((mouse.x - lastMouse.x) / 16, (mouse.y - lastMouse.y) / 16);
 
-    // if we should update the velocity or not
-    let updateVelocity = false;
+    // we should update the velocity
+    updateVelocity = true;
+  }
 
+  window.addEventListener("mousemove", onMouseMove);
+  window.addEventListener("touchmove", onMouseMove, {
+    passive: true,
+  });
 
-    // creating our PingPongPlane flowmap plane
-    // flowmap shaders
-    const flowmapVs = `
+  // if we should update the velocity or not
+  let updateVelocity = false;
+
+  // creating our PingPongPlane flowmap plane
+  // flowmap shaders
+  const flowmapVs = `
         #ifdef GL_FRAGMENT_PRECISION_HIGH
         precision highp float;
         #else
@@ -465,7 +486,7 @@ window.addEventListener("load", () => {
         }
     `;
 
-    const flowmapFs = `
+  const flowmapFs = `
         #ifdef GL_FRAGMENT_PRECISION_HIGH
         precision highp float;
         #else
@@ -503,86 +524,97 @@ window.addEventListener("load", () => {
         }
     `;
 
+  const bbox = curtains.getBoundingRect();
 
-    const bbox = curtains.getBoundingRect();
+  // note the use of half float texture and the custom sampler name used in our fragment shader
+  const flowMapParams = {
+    sampler: "uFlowMap",
+    vertexShader: flowmapVs,
+    fragmentShader: flowmapFs,
+    watchScroll: false, // position is fixed
+    texturesOptions: {
+      floatingPoint: "half-float", // use half float texture when possible
+    },
+    uniforms: {
+      mousePosition: {
+        name: "uMousePosition",
+        type: "2f",
+        value: mouse,
+      },
+      // size of the cursor
+      fallOff: {
+        name: "uFalloff",
+        type: "1f",
+        value:
+          bbox.width > bbox.height ? bbox.width / 15000 : bbox.height / 15000,
+      },
+      // alpha of the cursor
+      alpha: {
+        name: "uAlpha",
+        type: "1f",
+        value: 1,
+      },
+      // how much the cursor must dissipate over time (ie trail length)
+      // closer to 1 = no dissipation
+      dissipation: {
+        name: "uDissipation",
+        type: "1f",
+        value: 0.975,
+      },
+      // our velocity
+      velocity: {
+        name: "uVelocity",
+        type: "2f",
+        value: velocity,
+      },
+      // window aspect ratio to draw a circle
+      aspect: {
+        name: "uAspect",
+        type: "1f",
+        value: bbox.width / bbox.height,
+      },
+    },
+  };
 
-    // note the use of half float texture and the custom sampler name used in our fragment shader
-    const flowMapParams = {
-        sampler: "uFlowMap",
-        vertexShader: flowmapVs,
-        fragmentShader: flowmapFs,
-        watchScroll: false, // position is fixed
-        texturesOptions: {
-            floatingPoint: "half-float" // use half float texture when possible
-        },
-        uniforms: {
-            mousePosition: {
-                name: "uMousePosition",
-                type: "2f",
-                value: mouse,
-            },
-            // size of the cursor
-            fallOff: {
-                name: "uFalloff",
-                type: "1f",
-                value: bbox.width > bbox.height ? bbox.width / 15000 : bbox.height / 15000,
-            },
-            // alpha of the cursor
-            alpha: {
-                name: "uAlpha",
-                type: "1f",
-                value: 1,
-            },
-            // how much the cursor must dissipate over time (ie trail length)
-            // closer to 1 = no dissipation
-            dissipation: {
-                name: "uDissipation",
-                type: "1f",
-                value: 0.975,
-            },
-            // our velocity
-            velocity: {
-                name: "uVelocity",
-                type: "2f",
-                value: velocity,
-            },
-            // window aspect ratio to draw a circle
-            aspect: {
-                name: "uAspect",
-                type: "1f",
-                value: bbox.width / bbox.height,
-            },
-        },
-    };
+  // our ping pong plane
+  const flowMap = new PingPongPlane(
+    curtains,
+    curtains.container,
+    flowMapParams
+  );
 
+  flowMap
+    .onRender(() => {
+      // update mouse position
+      flowMap.uniforms.mousePosition.value = flowMap.mouseToPlaneCoords(mouse);
 
+      // update velocity
+      if (!updateVelocity) {
+        velocity.set(
+          curtains.lerp(velocity.x, 0, 0.5),
+          curtains.lerp(velocity.y, 0, 0.5)
+        );
+      }
+      updateVelocity = false;
 
-    // our ping pong plane
-    const flowMap = new PingPongPlane(curtains, curtains.container, flowMapParams);
-
-    flowMap.onRender(() => {
-        // update mouse position
-        flowMap.uniforms.mousePosition.value = flowMap.mouseToPlaneCoords(mouse);
-
-        // update velocity
-        if(!updateVelocity) {
-            velocity.set(curtains.lerp(velocity.x, 0, 0.5), curtains.lerp(velocity.y, 0, 0.5));
-        }
-        updateVelocity = false;
-
-        flowMap.uniforms.velocity.value = new Vec2(curtains.lerp(velocity.x, 0, 0.1), curtains.lerp(velocity.y, 0, 0.1));
-    }).onAfterResize(() => {
-        // update our window aspect ratio uniform
-        const boundingRect = flowMap.getBoundingRect();
-        flowMap.uniforms.aspect.value = boundingRect.width / boundingRect.height;
-        flowMap.uniforms.fallOff.value = boundingRect.width > boundingRect.height ? boundingRect.width / 15000 : boundingRect.height / 15000;
+      flowMap.uniforms.velocity.value = new Vec2(
+        curtains.lerp(velocity.x, 0, 0.1),
+        curtains.lerp(velocity.y, 0, 0.1)
+      );
+    })
+    .onAfterResize(() => {
+      // update our window aspect ratio uniform
+      const boundingRect = flowMap.getBoundingRect();
+      flowMap.uniforms.aspect.value = boundingRect.width / boundingRect.height;
+      flowMap.uniforms.fallOff.value =
+        boundingRect.width > boundingRect.height
+          ? boundingRect.width / 15000
+          : boundingRect.height / 15000;
     });
 
-
-
-    // now use the texture of our ping pong plane in the plane that will actually be displayed
-    // displacement shaders
-    const displacementVs = `
+  // now use the texture of our ping pong plane in the plane that will actually be displayed
+  // displacement shaders
+  const displacementVs = `
         #ifdef GL_FRAGMENT_PRECISION_HIGH
         precision highp float;
         #else
@@ -607,7 +639,7 @@ window.addEventListener("load", () => {
         }
     `;
 
-    const displacementFs = `
+  const displacementFs = `
         #ifdef GL_FRAGMENT_PRECISION_HIGH
         precision highp float;
         #else
@@ -646,24 +678,23 @@ window.addEventListener("load", () => {
         }
     `;
 
-    const passParams = {
-        vertexShader: displacementVs,
-        fragmentShader: displacementFs,
-        depth: false, // explicitly disable depth for the ripple effect to work
-    };
+  const passParams = {
+    vertexShader: displacementVs,
+    fragmentShader: displacementFs,
+    depth: false, // explicitly disable depth for the ripple effect to work
+  };
 
+  const shaderPass = new ShaderPass(curtains, passParams);
 
-    const shaderPass = new ShaderPass(curtains, passParams);
+  // create a texture that will hold our flowmap
+  const flowTexture = shaderPass.createTexture({
+    sampler: "uFlowTexture",
+    floatingPoint: "half-float",
+    fromTexture: flowMap.getTexture(), // set it based on our PingPongPlane flowmap plane's texture
+  });
 
-    // create a texture that will hold our flowmap
-    const flowTexture = shaderPass.createTexture({
-        sampler: "uFlowTexture",
-        floatingPoint: "half-float",
-        fromTexture: flowMap.getTexture() // set it based on our PingPongPlane flowmap plane's texture
-    });
-
-    // wait for our first pass and the flowmap to be ready
-    flowTexture.onSourceUploaded(() => {
-        const fxaaPass = new FXAAPass(curtains);
-    });
+  // wait for our first pass and the flowmap to be ready
+  flowTexture.onSourceUploaded(() => {
+    const fxaaPass = new FXAAPass(curtains);
+  });
 });
